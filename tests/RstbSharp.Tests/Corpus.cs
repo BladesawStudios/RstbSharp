@@ -1,8 +1,6 @@
-using System.Buffers.Binary;
 using SarcSharp;
 using Yaz0Sharp;
 using ZsDicSharp;
-using ZstdSharp;
 
 namespace RSTBSharp.Tests;
 
@@ -42,22 +40,19 @@ internal static class Corpus
     internal static void ForEachTotk(string root, ZsDic zs, Action<string, byte[]> visit)
         => ForEachFile(root, (path, data) => OpenTotk(path, data, zs, visit));
 
-    internal static byte[] OotTable(string root)
-        => new Decompressor().Unwrap(File.ReadAllBytes(Directory.GetFiles(Path.Combine(root, "System", "Resource"), "*.rsizetable.zs").Single())).ToArray();
+    internal static byte[] OotTable(string root, ZsDic zs)
+        => zs.Decompress(File.ReadAllBytes(Directory.GetFiles(Path.Combine(root, "System", "Resource"), "*.rsizetable.zs").Single()), ZsDictionary.None);
 
     // Visits every OoT file and every file in a .pack by its romfs path, decompressed.
-    internal static void ForEachOot(string root, Action<string, byte[]> visit)
-    {
-        OotZstd zstd = new(root);
-        ForEachFile(root, (path, data) => OpenOot(path, data, zstd, visit));
-    }
+    internal static void ForEachOot(string root, ZsDic zs, Action<string, byte[]> visit)
+        => ForEachFile(root, (path, data) => OpenOot(path, data, zs, visit));
 
-    private static void OpenOot(string path, byte[] data, OotZstd zstd, Action<string, byte[]> visit)
+    private static void OpenOot(string path, byte[] data, ZsDic zs, Action<string, byte[]> visit)
     {
-        data = zstd.Decompress(data);
+        if (ZsDic.IsCompressed(data)) data = zs.Decompress(data, path);
         visit(path, data);
         if (OotSizeCalculator.CanonicalName(path).EndsWith(".pack", StringComparison.Ordinal))
-            foreach (SarcEntry entry in SarcFile.FromBinary(data).Entries) OpenOot(entry.Name, entry.Data, zstd, visit);
+            foreach (SarcEntry entry in SarcFile.FromBinary(data).Entries) OpenOot(entry.Name, entry.Data, zs, visit);
     }
 
     private static void ForEachFile(string root, Action<string, byte[]> visit)
@@ -70,50 +65,6 @@ internal static class Corpus
         visit(path, data);
         if (TotkSizeCalculator.CanonicalName(path).EndsWith(".pack", StringComparison.Ordinal))
             foreach (SarcEntry entry in SarcFile.FromBinary(data).Entries) OpenTotk(entry.Name, entry.Data, zs, visit);
-    }
-}
-
-/// <summary>
-/// Picks OoT dictionaries by the ID in each zstd frame. ZsDic goes by file name and doesn't load the bkprb.zsdic this game adds.
-/// </summary>
-internal sealed class OotZstd
-{
-    private readonly Dictionary<uint, byte[]> _dictionaries = [];
-    private readonly ThreadLocal<Dictionary<uint, Decompressor>> _decompressors = new(() => []);
-
-    public OotZstd(string root)
-    {
-        byte[] pack = new Decompressor().Unwrap(File.ReadAllBytes(Path.Combine(root, "Pack", "ZsDic.pack.zs"))).ToArray();
-        foreach (SarcEntry entry in SarcFile.FromBinary(pack).Entries)
-            _dictionaries[BinaryPrimitives.ReadUInt32LittleEndian(entry.Data.AsSpan(4))] = entry.Data;
-    }
-
-    public byte[] Decompress(byte[] data)
-    {
-        if (!ZsDic.IsCompressed(data)) return data;
-        uint id = DictionaryId(data);
-        Dictionary<uint, Decompressor> cache = _decompressors.Value!;
-        if (!cache.TryGetValue(id, out Decompressor? decompressor))
-        {
-            decompressor = new Decompressor();
-            if (id != 0) decompressor.LoadDictionary(_dictionaries[id]);
-            cache[id] = decompressor;
-        }
-
-        return decompressor.Unwrap(data).ToArray();
-    }
-
-    private static uint DictionaryId(byte[] data)
-    {
-        byte descriptor = data[4];
-        int pos = (descriptor & 0x20) != 0 ? 5 : 6;
-        return (descriptor & 3) switch
-        {
-            1 => data[pos],
-            2 => BinaryPrimitives.ReadUInt16LittleEndian(data.AsSpan(pos)),
-            3 => BinaryPrimitives.ReadUInt32LittleEndian(data.AsSpan(pos)),
-            _ => 0,
-        };
     }
 }
 

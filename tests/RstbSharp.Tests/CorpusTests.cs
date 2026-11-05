@@ -78,7 +78,8 @@ public class CorpusTests
     [OotCorpusFact]
     public void OotTableRoundTrips()
     {
-        byte[] data = Corpus.OotTable(Corpus.OotRoot!);
+        using ZsDic zs = ZsDic.FromRomfs(Corpus.OotRoot!);
+        byte[] data = Corpus.OotTable(Corpus.OotRoot!, zs);
         ResourceSizeTable table = ResourceSizeTable.FromBinary(data);
 
         Assert.Equal(RstbFormat.Restbl, table.Format);
@@ -89,11 +90,12 @@ public class CorpusTests
     public void OotCalculatorNeverUnderestimatesVanilla()
     {
         string root = Corpus.OotRoot!;
-        ResourceSizeTable table = ResourceSizeTable.FromBinary(Corpus.OotTable(root));
+        using ZsDic zs = ZsDic.FromRomfs(root);
+        ResourceSizeTable table = ResourceSizeTable.FromBinary(Corpus.OotTable(root, zs));
         int checkedCount = 0, exact = 0;
         ConcurrentBag<string> under = [];
 
-        Corpus.ForEachOot(root, (path, data) =>
+        Corpus.ForEachOot(root, zs, (path, data) =>
         {
             uint size = OotSizeCalculator.Calculate(path, data, margin: false);
             if (size == 0 || !table.TryGetSize(OotSizeCalculator.CanonicalName(path), out uint vanilla)) return;
