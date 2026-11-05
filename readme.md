@@ -1,7 +1,7 @@
 # RstbSharp
 
 A C# reader and writer for resource size tables: `RSTB` from *Breath of the Wild* (Wii U and Switch)
-and `RESTBL` from *Tears of the Kingdom*, with YAML conversion and size calculators for both games.
+and `RESTBL` from *Tears of the Kingdom* and *Ocarina of Time* (Switch 2), with YAML conversion and size calculators.
 
 ```csharp
 ResourceSizeTable table = ResourceSizeTable.FromBinary(decompressed);
@@ -13,7 +13,12 @@ string yaml = table.ToYaml(knownNames);
 byte[] rebuilt = ResourceSizeTable.FromYaml(yaml).ToBinary();
 
 uint totk = TotkSizeCalculator.Calculate("Pack/Actor/Foo.pack.zs", decompressedPack);
+
+uint oot = OotSizeCalculator.Calculate("Model/Foo.Foo.bfres.zs", decompressedBfres);
 ```
+
+`OotSizeCalculator` adds a safety margin to the types it can only estimate (`bgyml`, `bfres`, `asb`, `bphsc`, `bkprcb`).
+Pass `margin: false` to get the bare value, and keep vanilla values for files you haven't changed.
 
 Tables are read and written decompressed (Yaz0 for `.srsizetable`, zstd for `.rsizetable.zs`).
 

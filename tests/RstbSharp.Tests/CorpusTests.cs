@@ -74,4 +74,35 @@ public class CorpusTests
         Assert.Empty(under);
         Assert.True(exact > checkedCount / 4, $"{exact} of {checkedCount} exact");
     }
+
+    [OotCorpusFact]
+    public void OotTableRoundTrips()
+    {
+        byte[] data = Corpus.OotTable(Corpus.OotRoot!);
+        ResourceSizeTable table = ResourceSizeTable.FromBinary(data);
+
+        Assert.Equal(RstbFormat.Restbl, table.Format);
+        Assert.Equal(data, table.ToBinary());
+    }
+
+    [OotCorpusFact]
+    public void OotCalculatorNeverUnderestimatesVanilla()
+    {
+        string root = Corpus.OotRoot!;
+        ResourceSizeTable table = ResourceSizeTable.FromBinary(Corpus.OotTable(root));
+        int checkedCount = 0, exact = 0;
+        ConcurrentBag<string> under = [];
+
+        Corpus.ForEachOot(root, (path, data) =>
+        {
+            uint size = OotSizeCalculator.Calculate(path, data, margin: false);
+            if (size == 0 || !table.TryGetSize(OotSizeCalculator.CanonicalName(path), out uint vanilla)) return;
+            Interlocked.Increment(ref checkedCount);
+            if (size == vanilla) Interlocked.Increment(ref exact);
+            else if (size < vanilla) under.Add($"{path}: {size} < {vanilla}");
+        });
+
+        Assert.True(under.IsEmpty, string.Join('\n', under.Take(50)));
+        Assert.True(exact > checkedCount * 0.9, $"{exact} of {checkedCount} exact");
+    }
 }

@@ -61,7 +61,7 @@ public static class TotkSizeCalculator
     }
 
     // The EXB section's signature table, which AINB and ASB both carry.
-    private static uint Exb(ReadOnlySpan<byte> data, int offset)
+    internal static uint Exb(ReadOnlySpan<byte> data, int offset)
     {
         if (offset == 0) return 0;
         uint signatures = ReadUInt32LittleEndian(data[(offset + ReadInt32LittleEndian(data[(offset + 0x20)..]))..]);
