@@ -1,3 +1,5 @@
+using System.Buffers.Binary;
+
 namespace RSTBSharp.Tests;
 
 /// <summary>The BotW and TotK size rules on hand-made inputs.</summary>
@@ -123,6 +125,49 @@ public class CalculatorTests
     {
         byte[] data = Byml();
         Assert.Equal(32u + 8856 + 9 * 16, OotSizeCalculator.Calculate("A.game__mod__NewType.bgyml", data, margin: false));
+    }
+
+    [Fact]
+    public void OotSizesBfresFromItsSections()
+    {
+        byte[] bfres = new byte[0x800];
+        void U16(int position, ushort value) => BinaryPrimitives.WriteUInt16LittleEndian(bfres.AsSpan(position), value);
+        void Pointer(int position, ulong value) => BinaryPrimitives.WriteUInt64LittleEndian(bfres.AsSpan(position), value);
+
+        U16(0xdc, 1);
+        Pointer(0x28, 0x100);
+        Pointer(0x100 + 0x18, 0x200);
+        U16(0x200 + 0x38, 3);
+
+        U16(0x100 + 0x6c, 1);
+        Pointer(0x100 + 0x38, 0x300);
+        bfres[0x300 + 0xa2] = 2;
+
+        // The second shape shares the first one's material and pointer but differs at 0x54, so only two get set up.
+        U16(0x100 + 0x6a, 3);
+        Pointer(0x100 + 0x28, 0x400);
+        bfres[0x400 + 0x5b] = 1;
+        U16(0x460 + 0x54, 1);
+        U16(0x4c0 + 0x52, 1);
+        bfres[0x4c0 + 0x5b] = 2;
+
+        U16(0xe2, 1);
+        Pointer(0x58, 0x600);
+        U16(0x600 + 0x4c, 3);
+        U16(0xe4, 1);
+        U16(0xe6, 1);
+        U16(0xe8, 1);
+        U16(0xea, 1);
+        U16(0xec, 1);
+
+        const uint material = 4689 + 2 * 60;
+        const uint shapes = 3 * 5882 + (0x750 + 0x270) + (0x750 + 2 * 0x270);
+        const uint model = 4538 + 16 + material + shapes;
+        const uint sections = 32 + 16 + 328 + 48 + 32 + 32 + 256;
+        uint offset = (0x19b0 + model + sections + 7) & ~7u;
+
+        Assert.Equal(0x800 + offset, OotSizeCalculator.Calculate("Model/A.bfres", bfres, margin: false));
+        Assert.Equal(0x800 + offset + 64 * 1024, OotSizeCalculator.Calculate("Model/A.bfres", bfres));
     }
 
     private static uint Aligned(byte[] data) => (uint)(data.Length + 31) & ~31u;

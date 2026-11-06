@@ -6,11 +6,11 @@ namespace RSTBSharp;
 
 /// <summary>
 /// Ocarina of Time RESTBL values, derived by fitting the 1.1.1 table to its romfs. Most types are exact; bfres, asb, bphsc
-/// and bkprcb are upper bounds and bgyml uses a cost model fitted per type. None of it has been read out of the game's code.
+/// and bkprcb are upper bounds and bgyml uses a cost model fitted per type. The game's code only informed the bfres bound.
 /// </summary>
 public static class OotSizeCalculator
 {
-    // Cross-validation on files the fit hadn't seen needed up to 12.6 KB for bgyml and 30 KB for bfres.
+    // Cross-validation on files the fit hadn't seen needed up to 12.6 KB for bgyml and 25 KB for bfres.
     private const uint EstimateMargin = 16 * 1024;
     private const uint BfresMargin = 64 * 1024;
 
@@ -153,25 +153,73 @@ public static class OotSizeCalculator
         return 12 + 1942 * sections;
     }
 
-    // Section magics before the string pool, which is where the file's metadata ends and its GPU data begins.
+    // Sized from the counts gsys::ModelResource reads at load. Part of a model's real cost depends on its shader archive, so
+    // this is an upper bound: the counts and minimums come from the game's code, and the amounts above them from fitting.
     private static long Bfres(ReadOnlySpan<byte> data)
     {
-        int stringPool = ReadInt32LittleEndian(data[0x20..]);
-        ReadOnlySpan<byte> meta = stringPool > 0 && stringPool <= data.Length ? data[..stringPool] : data;
-        long result = 9320;
-        for (int i = 0; i + 4 <= meta.Length; i++)
+        long result = 0x19b0;
+
+        int models = ReadUInt16LittleEndian(data[0xdc..]);
+        int modelArray = Pointer(data, 0x28);
+        for (int i = 0; i < models; i++)
+            result += BfresModel(data, modelArray + i * 0x78);
+
+        int animations = ReadUInt16LittleEndian(data[0xe2..]);
+        int animationArray = Pointer(data, 0x58);
+        for (int i = 0; i < animations; i++)
+            result += 32 + Align(4L * ReadUInt16LittleEndian(data[(animationArray + i * 0x50 + 0x4c)..]), 8);
+
+        result += 328L * ReadUInt16LittleEndian(data[0xe4..]) + 48L * ReadUInt16LittleEndian(data[0xe6..]);
+        result += 32L * (ReadUInt16LittleEndian(data[0xe8..]) + ReadUInt16LittleEndian(data[0xea..]));
+        result += 256L * ReadUInt16LittleEndian(data[0xec..]);
+        return Align(result, 8);
+    }
+
+    private static long BfresModel(ReadOnlySpan<byte> data, int model)
+    {
+        long result = 4538 + Align(4L * ReadUInt16LittleEndian(data[(Pointer(data, model + 0x18) + 0x38)..]), 8);
+
+        int materials = ReadUInt16LittleEndian(data[(model + 0x6c)..]);
+        int materialArray = Pointer(data, model + 0x38);
+        for (int i = 0; i < materials; i++)
+            result += 4689 + 60L * data[materialArray + i * 0xb0 + 0xa2];
+
+        int shapes = ReadUInt16LittleEndian(data[(model + 0x6a)..]);
+        int shapeArray = Pointer(data, model + 0x28);
+        for (int i = 0; i < shapes; i++)
         {
-            if (meta[i] != 'F') continue;
-            ReadOnlySpan<byte> magic = meta.Slice(i, 4);
-            if (magic.SequenceEqual("FSHP"u8)) result += 13491;
-            else if (magic.SequenceEqual("FMAT"u8)) result += 5707;
-            else if (magic.SequenceEqual("FSKL"u8)) result += 1412;
-            else if (magic.SequenceEqual("FSKA"u8)) result += 1212;
-            else if (magic.SequenceEqual("FCAM"u8)) result += 405;
+            int shape = shapeArray + i * 0x60;
+            result += 5882;
+            if (!IsSharedShape(data, shapeArray, i)) result += 0x750 + 0x270L * ShapeLods(data, shape);
         }
 
         return result;
     }
+
+    // The game gives a shape no setup of its own when an earlier one has its material and pointer at 0x10 but differs at 0x54.
+    private static bool IsSharedShape(ReadOnlySpan<byte> data, int shapeArray, int index)
+    {
+        int shape = shapeArray + index * 0x60;
+        if (index == 0 || data[shape + 0x5a] != 0) return false;
+
+        for (int i = 0; i < index; i++)
+        {
+            int other = shapeArray + i * 0x60;
+            if (ReadUInt16LittleEndian(data[(shape + 0x52)..]) != ReadUInt16LittleEndian(data[(other + 0x52)..])) continue;
+            return ReadUInt64LittleEndian(data[(shape + 0x10)..]) == ReadUInt64LittleEndian(data[(other + 0x10)..])
+                && ReadUInt16LittleEndian(data[(shape + 0x54)..]) != ReadUInt16LittleEndian(data[(other + 0x54)..]);
+        }
+
+        return false;
+    }
+
+    private static int ShapeLods(ReadOnlySpan<byte> data, int shape)
+    {
+        int index = data[shape + 0x5b];
+        return (data[shape + 4] & 0x10) == 0 ? index : data[Pointer(data, shape + 0x18) + index * 0x38 + 0x45];
+    }
+
+    private static int Pointer(ReadOnlySpan<byte> data, int position) => checked((int)ReadUInt64LittleEndian(data[position..]));
 
     /// <summary>What each bgyml type costs: a base, plus an amount per array element or map entry at each path in the file.</summary>
     private sealed class GymlModel
